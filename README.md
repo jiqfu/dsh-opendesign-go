@@ -84,40 +84,32 @@ CI 有五个作业：Windows 与 Ubuntu 各跑 Node 24 和 22.19，加一个独�
 
 这是 DSH 插件，需要 DSH 桌面端 `>= 0.2.0-rc.1`（见 `package.json` 的 `engines`）。
 
-**从 npm 安装（推荐）**，在 DSH 桌面端的插件管理界面里填包名：
+插件通过 GitHub Release 的 tgz 分发（本项目不发布到 npm）。
 
-```
-@jiqfu/dsh-opendesign-go
-```
+**Windows**：把 `install-opendesign-go.bat` 和 tgz 放进同一个文件夹，双击 bat。它会校验 SHA-256、装进 `web` profile、验证 bundle 层是否挂上，然后提醒你重启。
 
-装完重启桌面端，在设置里打开「OpenDesign Go」分区。
-
-**非桌面端 profile**（例如 `web`）也可以用命令行：
-
-```bash
-dsh plugin --profile web add @jiqfu/dsh-opendesign-go
-```
-
-没有 npm 发布渠道时，用 GitHub Release 上的 tgz：
+**命令行**（任意平台）：
 
 ```bash
 dsh plugin --profile web add /绝对路径/jiqfu-dsh-opendesign-go-0.1.11.tgz
 ```
 
-升级到最新版：
+`dsh plugin` 最终调用 pnpm，没装先执行 `npm install -g pnpm`。
 
-```bash
-dsh plugin --profile web add @jiqfu/dsh-opendesign-go@latest
-```
+**装完必须重启 `dsh web`**，插件在重启前不会加载。重启后在设置里找「OpenDesign Go」分区。
 
-### 为什么推荐 npm 而不是 GitHub
+升级到新版本就是对新 tgz 再跑一次 `add`，会原地覆盖。
 
-npm 包把构建产物和依赖版本一起锁定。GitHub 方式也能用（填 `github:EliteOtaku/dsh-opendesign-go`），但有两个代价：
+> `npm install -g <插件名>` 对 DSH 插件无效：全局 node_modules 不在 dsh 的模块解析路径里，插件只从 profile 目录加载。
 
-- **依赖会更慢、更易受上游变动影响**：GitHub 安装走 git 解析，拿到的是默认分支 HEAD，不是某个固定版本。
-- **npm v12 起 git 依赖默认不再解析**。自 npm 12 起 `--allow-git` 默认为 `none`，除非显式允许，`github:` 形式的依赖会被跳过。npm 包不涉及这条限制。
+### 为什么用 tgz 而不是从 GitHub 装
 
-构建产物 `lib/` 同时提交在仓库里，所以两条路径都不需要在本机构建。
+Release 上的 tgz 是 CI 构建、随 tag 一起产出的固定版本。GitHub 直装也能用（填 `github:EliteOtaku/dsh-opendesign-go`），但有两个代价：
+
+- **拿到的是默认分支 HEAD，不是某个固定版本**：GitHub 安装走 git 解析，出问题难以复现，也不好回滚到具体版本。
+- **npm v12 起 git 依赖默认不再解析**。自 npm 12 起 `--allow-git` 默认为 `none`，除非显式允许，`github:` 形式的依赖会被跳过。tgz 不涉及这条限制。
+
+这个项目不发布到 npm：npm 要求 granular token 并开启 2FA bypass 才能 publish，而 DSH 插件的正确安装路径本来就是 tgz（全局 node_modules 不被解析）。所以 tgz 是唯一的官方产物。
 
 > 桌面端的 `desktop` profile 由 Electron 应用独占管理：依赖和 `dsh.profile.bundles` 条目是分开落地的，命令行 `dsh plugin add` 只写其中一部分，结果通常是一半安装（启动报 `cannot resolve profile bundle`，或者插件静默不加载）。所以 desktop profile 请用插件管理界面，不要用命令行。
 

@@ -2,6 +2,11 @@
 # checkout must not rewrite line endings per platform.
 * text=auto eol=lf
 
+# Windows batch needs CRLF in the working tree: cmd.exe misparses labels and
+# goto targets in an LF-only script, even though git would happily commit it.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
 *.png binary
 *.jpg binary
 *.jpeg binary
