@@ -1,6 +1,9 @@
 - insert:
     - id: opendesign-go
-      name: dsh-opendesign-go
+      # The loader resolves `name` as a bare module specifier through Node's own
+      # rules, so it must be the package's real name — including the scope. A
+      # short name only works when the package is published unscoped.
+      name: '@jiqfu/dsh-opendesign-go'
       # Declared so the entry carries a config document from the first boot. An
       # entry with no config has no user layer, and the settings service then has
       # nothing to project into an editable form.
