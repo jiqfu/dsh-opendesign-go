@@ -1,0 +1,76 @@
+name: Publish
+
+# Publishing is a deliberate act: a push to main only verifies, and a release is
+# cut by tagging. The tag is the single source of truth for what shipped, so a
+# run that dies after `npm publish` cannot be confused with a version that was
+# never released — the tag already names it.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Package and verify, but do not publish'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `npm run check:dist` rebuilds and compares against the committed
+          # lib/, so the tag's own tree is what gets verified and shipped.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          # The registry scope and auth token come from setup-node rather than a
+          # committed .npmrc: the token must never exist in the repository.
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm ci
+
+      # `lib/` is committed; this fails the run when the committed artifact has
+      # drifted from src/, which is a broken release even though it installs.
+      - run: npm run check:dist
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      - name: Verify the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "tag v$tag does not match package.json $pkg" >&2
+            exit 1
+          fi
+
+      - run: npm pack --dry-run
+
+      - name: Publish
+        if: github.event_name == 'push' || inputs.dry_run == false
+        # --provenance publishes a signed build attestation linking this tarball
+        # to this commit; it needs the OIDC identity token below.
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-tarball
+          path: '*.tgz'
+          if-no-files-found: warn
+          retention-days: 14

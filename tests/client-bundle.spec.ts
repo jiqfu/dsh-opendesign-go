@@ -18,7 +18,7 @@ const body = source.replace(/^[\s\S]*?factory: \(require\) => \{/, '')
 
 describe('shipped client bundle', () => {
   it('registers through the host module loader instead of being an ES module', () => {
-    expect(source.startsWith('window.__ModuleLoader__.load({ id: "dsh-opendesign-go"')).toBe(true)
+    expect(source.startsWith('window.__ModuleLoader__.load({ id: "@jiqfu/dsh-opendesign-go"')).toBe(true)
     expect(source.trimEnd().endsWith('return module.exports; } });')).toBe(true)
   })
 
