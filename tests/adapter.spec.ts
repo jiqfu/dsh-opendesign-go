@@ -137,6 +137,76 @@ describe('OpenDesignAdapter.stream', () => {
     ])
   })
 
+  it('streams reasoning delivered under `reasoning` as well (#2)', async () => {
+    // OpenDesign's gateway sends `reasoning` (mirrored into
+    // `reasoning_details[0].text`) and never sends `reasoning_content`.
+    stubFetch(
+      sse([
+        JSON.stringify({ choices: [{ index: 0, delta: { role: 'assistant', reasoning: '', reasoning_details: [{ index: 0, type: 'reasoning.text', text: '' }] }, finish_reason: null }] }),
+        JSON.stringify({ choices: [{ index: 0, delta: { reasoning: 'The', reasoning_details: [{ index: 0, type: 'reasoning.text', text: 'The' }] }, finish_reason: null }] }),
+        JSON.stringify({ choices: [{ index: 0, delta: { reasoning: ' user', reasoning_details: [{ index: 0, type: 'reasoning.text', text: ' user' }] }, finish_reason: null }] }),
+        JSON.stringify({ choices: [{ index: 0, delta: { content: '答案' }, finish_reason: 'stop' }] }),
+        '[DONE]',
+      ]),
+    )
+
+    const chunks = await collect(adapterWith().stream(request()))
+
+    // The two fields carry the same increment; accumulating both would read
+    // "TheThe user user".
+    expect(chunks).toEqual([
+      { type: 'block-start', index: 0, blockType: 'reasoning' },
+      { type: 'reasoning-delta', index: 0, text: 'The' },
+      { type: 'reasoning-delta', index: 0, text: ' user' },
+      { type: 'block-start', index: 1, blockType: 'text' },
+      { type: 'text-delta', index: 1, text: '答案' },
+      { type: 'block-end', index: 0, block: { type: 'reasoning', text: 'The user' } },
+      { type: 'block-end', index: 1, block: { type: 'text', text: '答案' } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ])
+  })
+
+  it('falls back to reasoning_details when no scalar reasoning field is present', async () => {
+    stubFetch(
+      sse([
+        JSON.stringify({ choices: [{ index: 0, delta: { reasoning_details: [{ index: 0, type: 'reasoning.text', text: '先想' }] }, finish_reason: null }] }),
+        JSON.stringify({ choices: [{ index: 0, delta: { content: '再说' }, finish_reason: 'stop' }] }),
+        '[DONE]',
+      ]),
+    )
+
+    const chunks = await collect(adapterWith().stream(request()))
+
+    expect(chunks).toContainEqual({ type: 'reasoning-delta', index: 0, text: '先想' })
+    expect(chunks).toContainEqual({ type: 'block-end', index: 0, block: { type: 'reasoning', text: '先想' } })
+  })
+
+  it('keeps a thinking-only response instead of failing it as empty (#2)', async () => {
+    // max_tokens exhausted by thinking: the request produced a 200 SSE stream
+    // with usable reasoning and no visible content. Reporting
+    // emptyResponseFailure threw away a response the user had already paid for.
+    stubFetch(
+      sse([
+        JSON.stringify({ choices: [{ index: 0, delta: { reasoning: '想', reasoning_details: [{ index: 0, type: 'reasoning.text', text: '想' }] }, finish_reason: null }] }),
+        JSON.stringify({ choices: [{ index: 0, delta: { reasoning: '很久' }, finish_reason: null }] }),
+        JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'length' }] }),
+        JSON.stringify({ choices: [], usage: { prompt_tokens: 10, completion_tokens: 9, total_tokens: 19, completion_tokens_details: { reasoning_tokens: 9 } } }),
+        '[DONE]',
+      ]),
+    )
+
+    const chunks = await collect(adapterWith().stream(request()))
+
+    expect(chunks).toEqual([
+      { type: 'block-start', index: 0, blockType: 'reasoning' },
+      { type: 'reasoning-delta', index: 0, text: '想' },
+      { type: 'reasoning-delta', index: 0, text: '很久' },
+      { type: 'block-end', index: 0, block: { type: 'reasoning', text: '想很久' } },
+      { type: 'usage', usage: { inputTokens: 10, outputTokens: 9, totalTokens: 19, reasoningTokens: 9 } },
+      { type: 'finish', reason: { kind: 'max-tokens' } },
+    ])
+  })
+
   it('accumulates tool call deltas into one tool-call block', async () => {
     stubFetch(
       sse([
