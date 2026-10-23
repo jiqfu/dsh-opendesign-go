@@ -1,29 +1,31 @@
-name: Publish
+name: Release
 
-# Publishing is a deliberate act: a push to main only verifies, and a release is
-# cut by tagging. The tag is the single source of truth for what shipped, so a
-# run that dies after `npm publish` cannot be confused with a version that was
-# never released — the tag already names it.
+# A push to main only verifies (see verify.yml); a release is cut by tagging.
+# This workflow never publishes to npm — the plugin ships as a tarball attached
+# to the GitHub Release. npm requires a granular token with 2FA bypass to
+# publish, and `npm install -g` cannot install this plugin anyway: the DSH
+# loader resolves packages from the profile directory, never from the global
+# prefix. A tarball is the supported artifact.
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: 'Package and verify, but do not publish'
-        type: boolean
-        default: false
+      tag:
+        description: 'Existing tag to package and attach to (e.g. v0.1.11)'
+        type: string
+        required: true
 
 permissions:
   contents: read
-  # `npm publish --provenance` signs the tarball through GitHub's OIDC identity;
-  # without this the proxy refuses the request (EUSAGE) after the build is done.
-  id-token: write
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      # Uploading the tarball to the Release needs write access to contents.
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,9 +37,6 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          # The registry scope and auth token come from setup-node rather than a
-          # committed .npmrc: the token must never exist in the repository.
-          registry-url: 'https://registry.npmjs.org'
 
       - run: npm ci
 
@@ -50,30 +49,39 @@ jobs:
       - run: npm test
 
       - name: Verify the tag matches package.json
-        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME#v}"
+          tag="${RELEASE_TAG#v}"
           pkg="$(node -p "require('./package.json').version")"
           if [ "$tag" != "$pkg" ]; then
             echo "tag v$tag does not match package.json $pkg" >&2
             exit 1
           fi
+        env:
+          # push 事件给 ref_name（v0.1.11）；手动触发时用输入的 tag。
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
       - run: npm pack --dry-run
 
-      - name: Publish
-        if: github.event_name == 'push' || inputs.dry_run == false
-        # --provenance publishes a signed build attestation linking this tarball
-        # to this commit; it needs the OIDC identity token below.
-        run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: 'true'
+      - name: Pack the tarball
+        run: |
+          set -euo pipefail
+          rm -f *.tgz
+          npm pack
+          ls -l ./*.tgz
 
       - uses: actions/upload-artifact@v4
         with:
-          name: npm-tarball
+          name: release-tarball
           path: '*.tgz'
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
+
+      # Attach to the Release the tag already owns. `--clobber` keeps a re-run
+      # on the same tag idempotent instead of failing on the existing asset.
+      - name: Attach the tarball to the Release
+        run: gh release upload "$RELEASE_TAG" ./*.tgz --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # push 事件给 ref_name（v0.1.11）；手动触发时用输入的 tag。
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
