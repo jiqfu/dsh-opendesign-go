@@ -1,6 +1,6 @@
 {
   "name": "@jiqfu/dsh-opendesign-go",
-  "version": "0.1.11",
+  "version": "0.1.10",
   "format": "esm",
   "entry": "src/index.ts"
 }

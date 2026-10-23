@@ -2,6 +2,20 @@
 
 版本号与 GitHub 的 `vX.Y.Z` 标签一一对应。安装方式见 [README](README.md)。
 
+## 0.1.11
+
+装上了却看不到插件的修复：`cordis.patch.yml` 里插入的 `name` 改成带 scope 的真实包名。
+
+### 为什么之前装了不生效
+
+bundle 补丁里写的是 `name: dsh-opendesign-go`，但包发布名是 `@jiqfu/dsh-opendesign-go`。Cordis loader 把 `name` 当裸模块说明符、走 Node 自己的解析规则，于是它去 `node_modules/dsh-opendesign-go/` 找，而这个目录不存在——插件在安装阶段一切正常（依赖进了 `node_modules/@jiqfu/`、`dsh.bundle` 也被登记），到启动才静默失败，看起来就是「装了但没有」。
+
+### 验证
+
+拿打包好的 tgz 装进一个空 profile，用 loader 同一条解析路径分别试两个名字：短名 `MODULE_NOT_FOUND`，带 scope 的名字解析到 `lib/index.js`。
+
+顺带把 README 的安装命令改成真实包名，并补上 GitHub Release tgz 的装法。原文写的 `npm install -g <插件名>` 对 DSH 插件不成立：插件只从 profile 目录加载，全局 node_modules 不在解析路径里。
+
 ## 未发布
 
 修好思考内容读不到、以及「只有思考没有正文」时整条请求报空响应（issue #2）。

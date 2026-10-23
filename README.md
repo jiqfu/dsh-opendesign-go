@@ -87,7 +87,7 @@ CI 有五个作业：Windows 与 Ubuntu 各跑 Node 24 和 22.19，加一个独�
 **从 npm 安装（推荐）**，在 DSH 桌面端的插件管理界面里填包名：
 
 ```
-dsh-opendesign-go
+@jiqfu/dsh-opendesign-go
 ```
 
 装完重启桌面端，在设置里打开「OpenDesign Go」分区。
@@ -95,13 +95,19 @@ dsh-opendesign-go
 **非桌面端 profile**（例如 `web`）也可以用命令行：
 
 ```bash
-dsh plugin --profile web add dsh-opendesign-go
+dsh plugin --profile web add @jiqfu/dsh-opendesign-go
+```
+
+没有 npm 发布渠道时，用 GitHub Release 上的 tgz：
+
+```bash
+dsh plugin --profile web add /绝对路径/jiqfu-dsh-opendesign-go-0.1.11.tgz
 ```
 
 升级到最新版：
 
 ```bash
-npm install -g dsh-opendesign-go@latest
+dsh plugin --profile web add @jiqfu/dsh-opendesign-go@latest
 ```
 
 ### 为什么推荐 npm 而不是 GitHub
