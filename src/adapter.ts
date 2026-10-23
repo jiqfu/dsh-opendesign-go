@@ -547,6 +547,11 @@ async function* consumeSse(body: NonNullable<Response['body']>): AsyncGenerator<
   }
 
   if (state.contentBlocks === 0) throw emptyResponseFailure()
+  // Reasoning counts as content here, which is why the check is not `state.text
+  // === undefined`: a model whose thinking alone consumes the whole
+  // `max_tokens` budget stops with `finish_reason: length` before emitting any
+  // answer text, and that is a truncated but entirely valid response — not a
+  // degenerate one. Only a stream that produced no block at all is empty.
 
   for (const chunk of closeOpenBlocks(state)) yield chunk
   if (state.usage !== undefined) yield { type: 'usage', usage: state.usage }
@@ -600,6 +605,37 @@ function translateEvent(state: StreamState, payload: string): StreamChunk[] {
 }
 
 /**
+ * Read the thinking delta out of one streaming delta, whatever field name the
+ * gateway uses for it.
+ *
+ * OpenAI-compatible gateways are not consistent here: some send the canonical
+ * `reasoning_content`, OpenDesign's own gateway sends `reasoning` and mirrors
+ * the same increment into `reasoning_details[0].text`. The mirrors carry the
+ * same text rather than extra text, so the fields are read with `||` semantics
+ * — first non-empty wins — and a response is never concatenated twice into
+ * `WeWe need need`. `reasoning_details` is last because it also appears on
+ * gateways that use it for structured (non-text) reasoning parts, where an
+ * empty text means "nothing to show yet" rather than "no reasoning".
+ * @param delta - the provider's delta object.
+ * @returns the thinking increment, or an empty string when there is none.
+ */
+function reasoningText(delta: Record<string, unknown>): string {
+  for (const field of ['reasoning_content', 'reasoning'] as const) {
+    const value = delta[field]
+    if (typeof value === 'string' && value !== '') return value
+  }
+  const details = delta.reasoning_details
+  if (!Array.isArray(details)) return ''
+  let text = ''
+  for (const part of details) {
+    if (!isRecord(part)) continue
+    const value = part.text
+    if (typeof value === 'string') text += value
+  }
+  return text
+}
+
+/**
  * Translate one streaming delta into chunks.
  * @param state - per-response streaming state.
  * @param delta - the provider's delta object.
@@ -617,8 +653,8 @@ function collectDelta(state: StreamState, delta: Record<string, unknown>, chunks
     chunks.push({ type: 'text-delta', index: state.text.index, text: content })
   }
 
-  const reasoning = delta.reasoning_content
-  if (typeof reasoning === 'string' && reasoning !== '') {
+  const reasoning = reasoningText(delta)
+  if (reasoning !== '') {
     if (state.reasoning === undefined) {
       state.reasoning = { index: takeIndex(state), text: '' }
       state.contentBlocks += 1

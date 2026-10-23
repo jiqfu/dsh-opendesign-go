@@ -1,16 +1,16 @@
 {
-  "name": "dsh-opendesign-go",
-  "version": "0.1.9",
+  "name": "@jiqfu/dsh-opendesign-go",
+  "version": "0.1.10",
   "description": "OpenDesign Go plan model provider, usage display and account management for DeepSeek Harness",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/EliteOtaku/dsh-opendesign-go.git"
+    "url": "git+https://github.com/jiqfu/dsh-opendesign-go.git"
   },
   "homepage": "https://github.com/EliteOtaku/dsh-opendesign-go#readme",
   "bugs": {
-    "url": "https://github.com/EliteOtaku/dsh-opendesign-go/issues"
+    "url": "https://github.com/jiqfu/dsh-opendesign-go/issues"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0",

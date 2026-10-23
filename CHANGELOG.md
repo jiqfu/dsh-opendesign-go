@@ -2,6 +2,24 @@
 
 版本号与 GitHub 的 `vX.Y.Z` 标签一一对应。安装方式见 [README](README.md)。
 
+## 未发布
+
+修好思考内容读不到、以及「只有思考没有正文」时整条请求报空响应（issue #2）。
+
+### 为什么读不到
+
+OpenDesign 网关流式下发思考用的是 `delta.reasoning`，并把同一份增量镜像到 `delta.reasoning_details[0].text`；插件只读 `delta.reasoning_content`，而这个字段在 OpenDesign 的流里从头到尾不出现。本机实测同一模型 80 条 SSE 事件：`reasoning_content` 出现 0 次，`reasoning` 累计 102 字符，`reasoning_details` 出现 55 次。后果是思考块从不创建——虽然 `reasoning_tokens` 照常计费。
+
+### 为什么整条请求会失败
+
+当思考吃掉整个 `max_tokens`、正文一个字还没产出时，`contentBlocks` 仍是 0，插件抛 `emptyResponseFailure`。可网关返回的是 200 + 一条完整 SSE 流，思考内容真实存在、费用已经发生，却被当成空响应丢掉。
+
+### 现在怎么读
+
+- 三个字段都认，`reasoning_content` → `reasoning` → `reasoning_details` 依次取第一个非空值。短路是必须的：镜像与 `reasoning` 是同一份增量，两个都累加会得到 `WeWe need need`。
+- `reasoning_details` 只做兜底，给那些只用它的网关留着。
+- 补了四个测试，其中一个直接回放抓自真网关的 80 条事件；把修复回退后该用例立刻失败（0 条 reasoning-delta），说明它钉住的正是这个回归。
+
 ## 0.1.9
 
 长对话不再在「只用了三成上下文」时被拒。

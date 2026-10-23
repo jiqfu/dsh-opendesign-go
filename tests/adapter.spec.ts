@@ -3,6 +3,9 @@
  * global `fetch` that returns canned SSE bodies, so no gateway is contacted.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   BlockAssembler,
   LlmError,
@@ -135,6 +138,98 @@ describe('OpenDesignAdapter.stream', () => {
       { type: 'block-end', index: 1, block: { type: 'text', text: '答案' } },
       { type: 'finish', reason: { kind: 'stop' } },
     ])
+  })
+
+  it('streams reasoning delivered under `reasoning` as well (#2)', async () => {
+    // OpenDesign's gateway sends `reasoning` (mirrored into
+    // `reasoning_details[0].text`) and never sends `reasoning_content`.
+    stubFetch(
+      sse([
+        JSON.stringify({ choices: [{ index: 0, delta: { role: 'assistant', reasoning: '', reasoning_details: [{ index: 0, type: 'reasoning.text', text: '' }] }, finish_reason: null }] }),
+        JSON.stringify({ choices: [{ index: 0, delta: { reasoning: 'The', reasoning_details: [{ index: 0, type: 'reasoning.text', text: 'The' }] }, finish_reason: null }] }),
+        JSON.stringify({ choices: [{ index: 0, delta: { reasoning: ' user', reasoning_details: [{ index: 0, type: 'reasoning.text', text: ' user' }] }, finish_reason: null }] }),
+        JSON.stringify({ choices: [{ index: 0, delta: { content: '答案' }, finish_reason: 'stop' }] }),
+        '[DONE]',
+      ]),
+    )
+
+    const chunks = await collect(adapterWith().stream(request()))
+
+    // The two fields carry the same increment; accumulating both would read
+    // "TheThe user user".
+    expect(chunks).toEqual([
+      { type: 'block-start', index: 0, blockType: 'reasoning' },
+      { type: 'reasoning-delta', index: 0, text: 'The' },
+      { type: 'reasoning-delta', index: 0, text: ' user' },
+      { type: 'block-start', index: 1, blockType: 'text' },
+      { type: 'text-delta', index: 1, text: '答案' },
+      { type: 'block-end', index: 0, block: { type: 'reasoning', text: 'The user' } },
+      { type: 'block-end', index: 1, block: { type: 'text', text: '答案' } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ])
+  })
+
+  it('falls back to reasoning_details when no scalar reasoning field is present', async () => {
+    stubFetch(
+      sse([
+        JSON.stringify({ choices: [{ index: 0, delta: { reasoning_details: [{ index: 0, type: 'reasoning.text', text: '先想' }] }, finish_reason: null }] }),
+        JSON.stringify({ choices: [{ index: 0, delta: { content: '再说' }, finish_reason: 'stop' }] }),
+        '[DONE]',
+      ]),
+    )
+
+    const chunks = await collect(adapterWith().stream(request()))
+
+    expect(chunks).toContainEqual({ type: 'reasoning-delta', index: 0, text: '先想' })
+    expect(chunks).toContainEqual({ type: 'block-end', index: 0, block: { type: 'reasoning', text: '先想' } })
+  })
+
+  it('keeps a thinking-only response instead of failing it as empty (#2)', async () => {
+    // max_tokens exhausted by thinking: the request produced a 200 SSE stream
+    // with usable reasoning and no visible content. Reporting
+    // emptyResponseFailure threw away a response the user had already paid for.
+    stubFetch(
+      sse([
+        JSON.stringify({ choices: [{ index: 0, delta: { reasoning: '想', reasoning_details: [{ index: 0, type: 'reasoning.text', text: '想' }] }, finish_reason: null }] }),
+        JSON.stringify({ choices: [{ index: 0, delta: { reasoning: '很久' }, finish_reason: null }] }),
+        JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'length' }] }),
+        JSON.stringify({ choices: [], usage: { prompt_tokens: 10, completion_tokens: 9, total_tokens: 19, completion_tokens_details: { reasoning_tokens: 9 } } }),
+        '[DONE]',
+      ]),
+    )
+
+    const chunks = await collect(adapterWith().stream(request()))
+
+    expect(chunks).toEqual([
+      { type: 'block-start', index: 0, blockType: 'reasoning' },
+      { type: 'reasoning-delta', index: 0, text: '想' },
+      { type: 'reasoning-delta', index: 0, text: '很久' },
+      { type: 'block-end', index: 0, block: { type: 'reasoning', text: '想很久' } },
+      { type: 'usage', usage: { inputTokens: 10, outputTokens: 9, totalTokens: 19, reasoningTokens: 9 } },
+      { type: 'finish', reason: { kind: 'max-tokens' } },
+    ])
+  })
+
+  it('replays a real gateway stream: thinking visible, no duplicated text (#2)', async () => {
+    // Captured from amr-link.open-design.ai on 2026-10-23 with
+    // deepseek-v4.1-flash. The gateway sends `reasoning` and mirrors it into
+    // `reasoning_details[0].text`; `reasoning_content` never appears. Replayed
+    // verbatim so the regression is pinned to a real stream, not to a guess
+    // about what the gateway emits.
+    const events = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures-opendesign-reasoning.json'), 'utf8'))
+    stubFetch(sse(events.map((event: unknown) => JSON.stringify(event))))
+
+    const chunks = await collect(adapterWith().stream(request()))
+
+    const reasoningDeltas = chunks.filter((chunk) => chunk.type === 'reasoning-delta')
+    const reasoningEnd = chunks.find((chunk) => chunk.type === 'block-end' && chunk.block.type === 'reasoning')
+    expect(reasoningDeltas.length).toBeGreaterThan(0)
+    // The mirror must not double the text: the assembled block is byte-identical
+    // to the concatenation of the reasoning deltas.
+    const assembled = reasoningDeltas.map((chunk) => (chunk as { text: string }).text).join('')
+    expect(reasoningEnd).toMatchObject({ block: { type: 'reasoning', text: assembled } })
+    expect(chunks.some((chunk) => chunk.type === 'text-delta')).toBe(true)
+    expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'stop' } })
   })
 
   it('accumulates tool call deltas into one tool-call block', async () => {
