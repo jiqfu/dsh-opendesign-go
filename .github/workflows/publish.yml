@@ -16,6 +16,9 @@ on:
 
 permissions:
   contents: read
+  # `npm publish --provenance` signs the tarball through GitHub's OIDC identity;
+  # without this the proxy refuses the request (EUSAGE) after the build is done.
+  id-token: write
 
 jobs:
   publish:
