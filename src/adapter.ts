@@ -547,6 +547,11 @@ async function* consumeSse(body: NonNullable<Response['body']>): AsyncGenerator<
   }
 
   if (state.contentBlocks === 0) throw emptyResponseFailure()
+  // Reasoning counts as content here, which is why the check is not `state.text
+  // === undefined`: a model whose thinking alone consumes the whole
+  // `max_tokens` budget stops with `finish_reason: length` before emitting any
+  // answer text, and that is a truncated but entirely valid response — not a
+  // degenerate one. Only a stream that produced no block at all is empty.
 
   for (const chunk of closeOpenBlocks(state)) yield chunk
   if (state.usage !== undefined) yield { type: 'usage', usage: state.usage }
@@ -604,13 +609,15 @@ function translateEvent(state: StreamState, payload: string): StreamChunk[] {
  * gateway uses for it.
  *
  * OpenAI-compatible gateways are not consistent here: some send the canonical
- * `reasoning_content`, OpenDesign's own gateway sends `reasoning` and mirrors
- * the same increment into `reasoning_details[0].text`. The mirrors carry the
- * same text rather than extra text, so the fields are read with `||` semantics
- * — first non-empty wins — and a response is never concatenated twice into
- * `WeWe need need`. `reasoning_details` is last because it also appears on
- * gateways that use it for structured (non-text) reasoning parts, where an
- * empty text means "nothing to show yet" rather than "no reasoning".
+ * `reasoning_content`, OpenDesign's own gateway sends `reasoning` and also
+ * mirrors the same increment into `reasoning_details[0].text`. The mirrors
+ * carry the same text rather than extra text, so the fields are read with
+ * `||` semantics — first non-empty wins — and a response is never
+ * concatenated twice into `WeWe need need`. Bare `reasoning` is tried before
+ * `reasoning_content` only because a response never carries both; the order
+ * within them is irrelevant. `reasoning_details` is last because it also
+ * appears on gateways that use it for structured (non-text) reasoning parts,
+ * where an empty text means "nothing to show yet" rather than "no reasoning".
  * @param delta - the provider's delta object.
  * @returns the thinking increment, or an empty string when there is none.
  */
